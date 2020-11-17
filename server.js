@@ -1,0 +1,194 @@
+/*// server.js
+// this is the "hub" where the players' data gets sent to each other.
+// You 'probably' won't need to modify this file.
+
+// Here's a little socket.io "quick start" summary:
+// to send a message:               socket.emit(title,data);
+// to deal with a received message: socket.on(title,function(data){ frob(data); })
+
+//========================================================================
+const MAX_PER_ROOM = 2; // maximum number of players, which is 2 by default.
+                       // you can freely change it to another number here,
+                       // but will need to update the drawing code in public/sketch.js accordingly
+
+// express (https://expressjs.com/) is a simple node.js framework for writing servers
+const express = require("express");
+const app = express();
+var server = app.listen(process.env.PORT || 300);
+
+// make all the files in 'public' available
+// https://expressjs.com/en/starter/static-files.html
+app.use(express.static("public"));
+
+// socket.io is a simple library for networking
+var io = require('socket.io')(server);
+
+var serverData = {}; // everyone's data
+var numPlayers = 0; // current number of players
+var updateCounter = 0; 
+
+console.log("listening...")
+
+// What to do when there's a new player connection:
+io.sockets.on('connection', newConnection);
+function newConnection(socket){
+  
+  // Note: "socket" now refers to this particular new player's connection
+  console.log('new connection: ' + socket.id);
+  
+  // if there're too many players, reject player's request to join
+  if (numPlayers >= MAX_PER_ROOM ){
+    socket.emit("connection-reject");
+    return;
+  }
+  numPlayers++;
+  
+  // OK you're in!
+  socket.emit("connection-approve");
+  
+  
+  // What to do when client sends us a message entitled 'client-update'
+  socket.on('client-update',function(data){
+    // Here the client updates us about itself
+    // in this simple example, we just need to dump the client's data
+    // into a big table for sending to everyone later!
+    serverData[socket.id] = data;
+    updateCounter++;
+  })
+
+  
+  // Every few milliseconds we send, to this client,
+  // the data of everybody else's client.
+  // Note: setInterval(f,t) = runs function f every t milliseconds
+  let timer = setInterval(function(){
+    var others = {};
+    for (var k in serverData){
+      if (k != socket.id){
+        others[k] = serverData[k];
+      }
+    }
+		socket.emit('server-update', others);
+	}, 10);
+  
+  
+  // What to do if the client disconnected: let's clean up after them.
+  socket.on('disconnect', function(){
+    clearInterval(timer); // cancel the scheduled updates we set up earlier
+    delete serverData[socket.id];
+    console.log(socket.id+' disconnected');
+    numPlayers--;
+  });
+  
+  // Egads, we received the "crash-the-server" message!
+  // Time for us to restart by deliberately causing an error.
+  socket.on('crash-the-server', function(){
+    console.log("crashing...")
+    var notFun = undefined;
+    notFun(); // calling the undefined notFun() causes a (desired) crash!
+  });
+}
+*/
+// server.js
+// this is the "hub" where players' data got sent to each other
+
+const MAX_PER_ROOM = 2; // maximum number of people per room -- change me!
+
+// express (https://expressjs.com/) is a simple node.js framework for writing servers
+const express = require("express");
+const app = express();
+var server = app.listen(process.env.PORT || 300);
+
+// make all the files in 'public' available
+// https://expressjs.com/en/starter/static-files.html
+app.use(express.static("public"));
+
+// socket.io is a simple library for networking
+var io = require('socket.io')(server);
+
+// socket.io quick start:
+// to send a message:               socket.emit(title,data);
+// to deal with a received message: socket.on(title,function(data){ frob(data); })
+
+var serverData = {}; // everyone's data
+
+console.log("listening...")
+
+// what to do when there's a new player connection:
+io.sockets.on('connection', newConnection);
+function newConnection(socket){
+  // "socket" now refers to this particular new player's connection
+  
+  console.log('new connection: ' + socket.id);
+  
+  let room; // name of the room this player, to be set
+            // when they're allowed in
+  
+  // what to do when client sends us a message titled 'client-start'
+  socket.on('client-start',function(data){
+    
+    // when client want to enter a room
+    // let's count how many people are in the room first,
+    // before we decide whether or not to accept them.
+    
+    let cnt = 0;
+    for (var k in serverData){
+      if (serverData[k].room == data.room){
+        cnt++;
+      }
+    }
+    
+    // too many people in the room! reject client
+    if (cnt >= MAX_PER_ROOM){
+      socket.emit("connection-reject");
+      return;
+    }
+    
+    // ok, you're in
+    socket.emit("connection-approve");
+    room = data.room;
+  })
+  
+  // what to do when client sends us a message titled 'client-update'
+  socket.on('client-update',function(data){
+    
+    // here the client updates us about itself
+    // in this simple example, we just need to dump the client's data
+    // in to a big table for sending to everyone (in the same room) later!
+    
+    if (!room){
+      return;
+    }
+    serverData[socket.id] = data;
+    room = data.room;
+  })
+
+  // every couple milliseconds we send to this client
+  // the data of everybody in the same room
+  
+  // setInterval(f,t) = run function f every t milliseconds
+  let timer = setInterval(function(){
+    
+    if (!room){
+      return;
+    }
+    
+    // collect everybody in the same room's data
+    var others = {};
+    for (var k in serverData){
+      if (k != socket.id && serverData[k].room == room){
+        others[k] = serverData[k];
+      }
+    }
+    
+    // send 'em to the client!
+		socket.emit('server-update', others);
+	}, 10);
+  
+  // the client disconnected, let's wipe up after them
+  socket.on('disconnect', function(){
+    clearInterval(timer); // cancel the scheduled updates we set up earlier
+    delete serverData[socket.id];
+    console.log(socket.id+' disconnected');
+
+  });
+}
